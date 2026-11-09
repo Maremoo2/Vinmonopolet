@@ -219,11 +219,16 @@ def main():
         if args.command == "sync" and not 1 <= args.page_size <= 1000:
             parser.error("--page-size må være mellom 1 og 1000")
         if args.command in {"probe", "sync"}:
-            key = os.environ.get("VINMONOPOLET_API_KEY")
+            key = os.environ.get("VINMONOPOLET_API_KEY", "").strip()
             if not key and sys.stdin.isatty():
                 key = getpass("Open API-nøkkel: ").strip()
             if not key:
                 raise ImportErrorDetail("Mangler Open-nøkkel. Bruk VINMONOPOLET_API_KEY.")
+            if not key.isascii() or any(not 33 <= ord(char) <= 126 for char in key):
+                raise ImportErrorDetail(
+                    "Open-nøkkelen inneholder mellomrom, linjeskift eller ugyldige tegn. "
+                    "Lagre bare selve nøkkelen."
+                )
             client = OpenProducts(key)
         if args.command == "probe":
             probe(client, args.varenummer)
