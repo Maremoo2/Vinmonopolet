@@ -48,8 +48,12 @@ class OpenProducts:
 
     def page(self, **params):
         request = Request(
-            ENDPOINT + "?" + urlencode(params),
-            headers={"Ocp-Apim-Subscription-Key": self.key, "Accept": "application/json"},
+            ENDPOINT + ("?" + urlencode(params) if params else ""),
+            headers={
+                "Ocp-Apim-Subscription-Key": self.key,
+                "Cache-Control": "no-cache",
+                "Accept-Encoding": "gzip",
+            },
         )
         for attempt in range(3):
             if self.calls >= 3900:
@@ -133,7 +137,16 @@ def check_page_ids(rows, seen):
 def probe(client, product_ids):
     seen = set()
     for offset in (0, 5):
-        rows = client.page(maxResults=5, start=offset)
+        try:
+            rows = client.page(maxResults=5, start=offset)
+        except ImportErrorDetail as error:
+            if offset == 0:
+                try:
+                    rows = client.page()
+                    print(f"HTTP 200 uten parametere, {len(rows)} rader")
+                except ImportErrorDetail as baseline_error:
+                    print(f"Kontroll uten parametere: {baseline_error}")
+            raise ImportErrorDetail(f"Side start={offset}: {error}") from None
         check_page_ids(rows, seen)
         print(f"HTTP 200, start={offset}, {len(rows)} rader")
         if not rows:
