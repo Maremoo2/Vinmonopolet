@@ -3,6 +3,7 @@ import argparse
 import csv
 from datetime import date, datetime, timedelta, timezone
 from getpass import getpass
+import gzip
 import json
 import os
 from pathlib import Path
@@ -58,7 +59,11 @@ class OpenProducts:
             self.calls += 1
             try:
                 with self.opener.open(request, timeout=30) as response:
-                    data = json.load(response)
+                    status = response.status
+                    content_type = response.headers.get_content_type()
+                    encoding = response.headers.get("Content-Encoding", "").strip().lower()
+                    body = response.read()
+                data = decode_response(body, status, content_type, encoding)
                 return parse_page(data)
             except HTTPError as error:
                 retry_after = error.headers.get("Retry-After", "")
@@ -76,8 +81,26 @@ class OpenProducts:
                 if attempt == 2:
                     raise ImportErrorDetail("Nettverksfeil ved oppslag mot Vinmonopolet.") from None
                 time.sleep(2 ** (attempt + 1))
-            except (ValueError, UnicodeError):
-                raise ImportErrorDetail("API-et returnerte ugyldig JSON.") from None
+
+
+def decode_response(body, status, content_type, encoding):
+    # Some gateways return compressed responses even for small requests.
+    if encoding == "gzip" or body.startswith(b"\x1f\x8b"):
+        try:
+            body = gzip.decompress(body)
+        except (OSError, EOFError):
+            raise ImportErrorDetail(f"HTTP {status}. Ugyldig gzip-respons.") from None
+    try:
+        return json.loads(body)
+    except (ValueError, UnicodeError):
+        response_type = content_type if content_type in {
+            "application/json", "text/html", "text/plain", "application/octet-stream"
+        } else "ukjent"
+        response_encoding = encoding if encoding in {"gzip", "br", "deflate"} else "ukjent" if encoding else "ingen"
+        raise ImportErrorDetail(
+            f"HTTP {status}. Ugyldig JSON ({response_type}, komprimering: {response_encoding}, "
+            f"{len(body)} byte)."
+        ) from None
 
 
 def parse_page(data):
